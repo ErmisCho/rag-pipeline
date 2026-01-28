@@ -20,7 +20,7 @@ class IngestResponse(BaseModel):
 
 class SearchRequest(BaseModel):
     query: str = Field(..., min_length=1)
-    top_k: int = Field(4, ge=1, le=50)
+    top_k: int = Field(10, ge=1, le=50)
 
 
 class Citation(BaseModel):
@@ -36,7 +36,7 @@ class SearchResponse(BaseModel):
 
 class AskRequest(BaseModel):
     query: str = Field(..., min_length=1)
-    top_k: int = Field(4, ge=1, le=50)
+    top_k: int = Field(10, ge=1, le=50)
 
 
 class AskResponse(BaseModel):

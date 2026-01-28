@@ -88,7 +88,13 @@ async def ingest(payload: IngestRequest):
         raise HTTPException(status_code=500, detail="Ingest failed") from e
 
     latency_ms = int((time.perf_counter() - start) * 1000)
-    logger.info(f"stage=ingest latency_ms={latency_ms} chunks={chunks}")
+    # Log counts only to avoid large/PII payloads.
+    logger.info(
+        "stage=ingest latency_ms=%s chunks_count=%s doc_id=%s",
+        latency_ms,
+        chunks,
+        payload.doc_id,
+    )
     return IngestResponse(status="ok", chunks=chunks)
 
 
