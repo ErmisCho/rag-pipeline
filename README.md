@@ -80,22 +80,48 @@ cp .env.example .env
 Fill in your values:
 
 ```bash
-# LangSmith (optional)
+#############################
+# Observability (LangSmith)
+#############################
 LANGSMITH_TRACING=true
 LANGSMITH_ENDPOINT=https://api.smith.langchain.com
-LANGSMITH_PROJECT=rag-pipeline
+LANGSMITH_PROJECT=Documentation Helper
 LANGSMITH_API_KEY=<api_key>
 
-# Tavily for crawling
+#############################
+# Crawling
+#############################
 TAVILY_API_KEY=<api_key>
 
-# Google Gemini (LLM and embeddings)
-GEMINI_API_KEY=<api_key>
-EMBEDDING_MODEL=text-embedding-004
-
-# Pinecone vector database
+#############################
+# Vector DB (Pinecone)
+#############################
 PINECONE_API_KEY=<api_key>
-INDEX_NAME=<index_name>
+INDEX_NAME=langchain-docs-2025
+
+#############################
+# Gemini (Embeddings)
+#############################
+GEMINI_API_KEY=<api_key>
+EMBEDDING_MODEL=gemini-embedding-001
+
+#############################
+# Providers (LLM + Embeddings)
+#############################
+LLM_PROVIDER=ollama
+EMBEDDINGS_PROVIDER=ollama
+
+#############################
+# Ollama (Local)
+#############################
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=llama3.1:8b
+OLLAMA_EMBED_MODEL=nomic-embed-text:latest
+
+#############################
+# OpenAI (Unused in this project)
+#############################
+OPENAI_API_KEY=<your-openai-api-key>
 ```
 
 ---
@@ -121,6 +147,14 @@ uv run python backend/ingestion.py
 # Start the Streamlit application
 ```bash
 uv run streamlit run app/main.py
+```
+
+## FastAPI Service
+
+Run the API server:
+
+```bash
+uv run uvicorn api.main:app --host 0.0.0.0 --port 8000
 ```
 
 

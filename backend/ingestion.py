@@ -2,13 +2,13 @@ import asyncio
 import os
 from pathlib import Path
 import ssl
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 import certifi
 from dotenv import load_dotenv
-# from langchain_chroma import Chroma
 from langchain_classic.text_splitter import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
+from langchain_ollama import OllamaEmbeddings
 from langchain_pinecone import PineconeVectorStore
 from langchain_tavily import TavilyCrawl, TavilyExtract, TavilyMap
 
@@ -23,25 +23,72 @@ ssl_context = ssl.create_default_context(cafile=certifi.where())
 os.environ["SSL_CERT_FILE"] = certifi.where()
 os.environ["REQUESTS_CA_BUNDLE"] = certifi.where()
 
-base_embeddings = GoogleGenerativeAIEmbeddings(
-    google_api_key=os.environ["GEMINI_API_KEY"],
-    model=os.environ.get("EMBEDDING_MODEL", "text-embedding-004"),
-    chunk_size=50,
-    retry_min_seconds=10)
-
-vectorstore = PineconeVectorStore(
-    index_name="langchain-docs-2025", embedding=base_embeddings)
 tavily_extract = TavilyExtract()
 tavily_map = TavilyMap(max_depth=5, max_breadth=20, max_pages=1000)
 tavily_crawl = TavilyCrawl()
 
 
-async def index_documents_async(documents: List[Document], batch_size: int = 50):
+def get_embeddings():
+    provider = os.environ.get("EMBEDDINGS_PROVIDER", "gemini").lower()
+    if provider == "ollama":
+        return OllamaEmbeddings(
+            model=os.environ.get("OLLAMA_EMBED_MODEL", "nomic-embed-text:latest"),
+            base_url=os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434"),
+        )
+    return GoogleGenerativeAIEmbeddings(
+        google_api_key=os.environ["GEMINI_API_KEY"],
+        model=os.environ.get("EMBEDDING_MODEL", "gemini-embedding-001"),
+        chunk_size=50,
+        retry_min_seconds=10,
+    )
+
+
+def get_vectorstore() -> PineconeVectorStore:
+    return PineconeVectorStore(
+        index_name=os.environ["INDEX_NAME"], embedding=get_embeddings()
+    )
+
+
+def chunk_text(text: str) -> List[Document]:
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=4000, chunk_overlap=200
+    )
+    return text_splitter.split_documents([Document(page_content=text, metadata={})])
+
+
+async def ingest_text(
+    doc_id: str,
+    text: str,
+    metadata: Optional[Dict[str, Any]] = None,
+    batch_size: int = 50,
+) -> int:
+    logger.info("INGEST TEXT")
+    base_metadata = metadata or {}
+    source = base_metadata.get("source", doc_id)
+    split_docs = chunk_text(text)
+    for i, doc in enumerate(split_docs):
+        doc.metadata = {
+            **base_metadata,
+            "source": source,
+            "doc_id": doc_id,
+            "chunk_id": i,
+        }
+    vectorstore = get_vectorstore()
+    await index_documents_async(split_docs, batch_size=batch_size, vectorstore=vectorstore)
+    return len(split_docs)
+
+
+async def index_documents_async(
+    documents: List[Document],
+    batch_size: int = 50,
+    vectorstore: Optional[PineconeVectorStore] = None,
+):
     """Process documents in batches asynchronously."""
     logger.info("VECTOR STORAGE PHASE")
     logger.info(
         f"VectorStore Indexing: Preparing to add {len(documents)} documents to vector store",
     )
+    vectorstore = vectorstore or get_vectorstore()
 
     # Create batches
     batches = [
@@ -84,18 +131,29 @@ async def index_documents_async(documents: List[Document], batch_size: int = 50)
 
 async def main():
     """Main async function to orchestrate the entire process."""
+    await crawl_and_ingest(
+        url="https://python.langchain.com/",
+        max_depth=5,
+        extract_depth="advanced",
+    )
+
+
+async def crawl_and_ingest(
+    url: str,
+    max_depth: int = 5,
+    extract_depth: str = "advanced",
+    batch_size: int = 500,
+) -> Dict[str, int]:
     logger.info("DOCUMENTATION INGESTION PIPELINE")
 
     logger.info(
         "TavilyCrawl: Starting to crawl the documentation site",
     )
-    # Crawl the documentation site
-
     res = tavily_crawl.invoke(
         {
-            "url": "https://python.langchain.com/",
-            "max_depth": 5,
-            "extract_depth": "advanced",
+            "url": url,
+            "max_depth": max_depth,
+            "extract_depth": extract_depth,
         }
     )
 
@@ -126,20 +184,25 @@ async def main():
     )
 
     text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=4000, chunk_overlap=200)
+        chunk_size=4000, chunk_overlap=200
+    )
     splitted_docs = text_splitter.split_documents(all_docs)
     logger.info(
         f"Text Splitter: Created {len(splitted_docs)} chunks from {len(all_docs)} documents"
     )
 
     # Process documents asynchronously
-    await index_documents_async(splitted_docs, batch_size=500)
+    await index_documents_async(splitted_docs, batch_size=batch_size)
 
     logger.info("PIPELINE COMPLETE")
     logger.info("Documentation ingestion pipeline finished successfully!")
     logger.info("Summary:")
     logger.info(f"Documents extracted: {len(all_docs)}")
     logger.info(f"Chunks created: {len(splitted_docs)}")
+    return {
+        "documents": len(all_docs),
+        "chunks": len(splitted_docs),
+    }
 
 
 if __name__ == '__main__':
