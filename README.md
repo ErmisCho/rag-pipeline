@@ -157,6 +157,38 @@ Run the API server:
 uv run uvicorn api.main:app --host 0.0.0.0 --port 8000
 ```
 
+## Docker (FastAPI)
+
+Build the image:
+
+```bash
+docker build -t rag-api .
+```
+
+Run the container:
+
+```bash
+docker run --rm -p 8000:8000 rag-api
+```
+
+Run with Docker Compose (auto-loads `.env`):
+
+```bash
+docker compose up --build
+```
+
+Streamlit UI:
+
+```bash
+open http://localhost:8501
+```
+
+Health check:
+
+```bash
+curl http://localhost:8000/health
+```
+
 
 ---
 

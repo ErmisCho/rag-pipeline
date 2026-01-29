@@ -1,0 +1,31 @@
+services:
+  api:
+    build: .
+    image: rag-api
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+  streamlit:
+    build: .
+    image: rag-api
+    env_file:
+      - .env
+    environment:
+      API_ASK_URL: http://api:8000/ask
+    command:
+      [
+        "uv",
+        "run",
+        "streamlit",
+        "run",
+        "app/main.py",
+        "--server.address",
+        "0.0.0.0",
+        "--server.port",
+        "8501",
+      ]
+    ports:
+      - "8501:8501"
+    depends_on:
+      - api
