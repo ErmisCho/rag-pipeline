@@ -4,6 +4,8 @@ services:
     image: rag-api
     env_file:
       - .env
+    environment:
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
     ports:
       - "8000:8000"
   streamlit:
@@ -13,6 +15,7 @@ services:
       - .env
     environment:
       API_ASK_URL: http://api:8000/ask
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
     command:
       [
         "uv",

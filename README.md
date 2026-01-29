@@ -185,8 +185,9 @@ Run with Docker Compose (auto-loads `.env`):
 docker compose up --build
 ```
 
-If you run Ollama locally, set `OLLAMA_BASE_URL=http://host.docker.internal:11434`
-in `.env` so the containers can reach it.
+By default, local runs use `http://localhost:11434`. Docker Compose overrides
+`OLLAMA_BASE_URL` to `http://host.docker.internal:11434` so containers reach
+your host Ollama without changing `.env`.
 
 Streamlit UI:
 
