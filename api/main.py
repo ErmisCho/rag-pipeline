@@ -82,7 +82,8 @@ async def ingest(payload: IngestRequest):
         )
     except KeyError as e:
         logger.exception("stage=ingest error=missing_env")
-        raise HTTPException(status_code=500, detail=f"Missing env var: {e}") from e
+        raise HTTPException(
+            status_code=500, detail=f"Missing env var: {e}") from e
     except Exception as e:
         logger.exception("stage=ingest error=internal")
         raise HTTPException(status_code=500, detail="Ingest failed") from e
@@ -113,7 +114,8 @@ async def search(payload: SearchRequest):
     citations: List[Citation] = []
     for i, (doc, score) in enumerate(results):
         metadata = doc.metadata or {}
-        doc_id = str(metadata.get("doc_id") or metadata.get("source") or "unknown")
+        doc_id = str(metadata.get("doc_id")
+                     or metadata.get("source") or "unknown")
         chunk_id = metadata.get("chunk_id", i)
         citations.append(
             Citation(
@@ -135,7 +137,15 @@ async def ask(payload: AskRequest):
         logger.exception("stage=search error=internal")
         raise HTTPException(status_code=500, detail="Search failed") from e
     search_latency_ms = int((time.perf_counter() - search_start) * 1000)
-    logger.info(f"stage=search latency_ms={search_latency_ms} top_k={payload.top_k}")
+    logger.info(
+        f"stage=search latency_ms={search_latency_ms} top_k={payload.top_k}")
+    if not results:
+        logger.info(
+            "stage=guardrail triggered=true reason=empty_results top_score=0 sources=0")
+        return AskResponse(
+            answer="Not enough evidence in the provided documents.",
+            citations=[],
+        )
 
     llm_start = time.perf_counter()
     try:
@@ -143,7 +153,8 @@ async def ask(payload: AskRequest):
         reranked_results = []
         for doc, score in results:
             metadata = doc.metadata or {}
-            source = str(metadata.get("source") or metadata.get("doc_id") or "")
+            source = str(metadata.get("source")
+                         or metadata.get("doc_id") or "")
             source_lower = source.lower()
             content_lower = (doc.page_content or "").lower()
             term_hits = sum(1 for term in query_terms if term in content_lower)
@@ -151,7 +162,8 @@ async def ask(payload: AskRequest):
             if "overview" in source_lower and "langchain" in source_lower:
                 bonus += 0.15
             reranked_results.append((doc, score + bonus))
-        results = sorted(reranked_results, key=lambda item: item[1], reverse=True)
+        results = sorted(reranked_results,
+                         key=lambda item: item[1], reverse=True)
 
         note_threshold = float(os.environ.get("NOTE_SCORE_THRESHOLD", "0.6"))
         note_margin = float(os.environ.get("NOTE_SCORE_MARGIN", "0.05"))
@@ -161,9 +173,11 @@ async def ask(payload: AskRequest):
         for doc, score in results:
             if (doc.metadata or {}).get("doc_id"):
                 note_docs.append(doc)
-                best_note_score = score if best_note_score is None else max(best_note_score, score)
+                best_note_score = score if best_note_score is None else max(
+                    best_note_score, score)
             else:
-                best_other_score = score if best_other_score is None else max(best_other_score, score)
+                best_other_score = score if best_other_score is None else max(
+                    best_other_score, score)
         note_term_match = any(
             term in (doc.page_content or "").lower()
             for doc in note_docs
@@ -175,35 +189,41 @@ async def ask(payload: AskRequest):
             and (best_other_score is None or best_note_score >= best_other_score + note_margin)
             and note_term_match
         )
-        docs_for_answer = note_docs if use_notes_only else [doc for doc, _ in results[:4]]
+        docs_for_answer = note_docs if use_notes_only else [
+            doc for doc, _ in results[:4]]
         llm_result = answer_with_docs(
             payload.query, documents=docs_for_answer, chat_history=[]
         )
         answer_text = str(llm_result.get("result", "")).strip()
         answer_lower = answer_text.lower()
-        has_term_overlap = any(term in answer_lower for term in query_terms) if query_terms else True
+        has_term_overlap = any(
+            term in answer_lower for term in query_terms) if query_terms else True
         if (len(answer_text) < 40) or (not has_term_overlap):
             retry_top_k = max(payload.top_k * 2, 20)
             retry_results = search_docs(payload.query, top_k=retry_top_k)
             reranked_retry = []
             for doc, score in retry_results:
                 metadata = doc.metadata or {}
-                source = str(metadata.get("source") or metadata.get("doc_id") or "")
+                source = str(metadata.get("source")
+                             or metadata.get("doc_id") or "")
                 source_lower = source.lower()
                 content_lower = (doc.page_content or "").lower()
-                term_hits = sum(1 for term in query_terms if term in content_lower)
+                term_hits = sum(
+                    1 for term in query_terms if term in content_lower)
                 bonus = 0.02 * term_hits
                 if "overview" in source_lower and "langchain" in source_lower:
                     bonus += 0.15
                 reranked_retry.append((doc, score + bonus))
-            reranked_retry = sorted(reranked_retry, key=lambda item: item[1], reverse=True)
+            reranked_retry = sorted(
+                reranked_retry, key=lambda item: item[1], reverse=True)
             docs_for_answer = [doc for doc, _ in reranked_retry[:6]]
             llm_result = answer_with_docs(
                 payload.query, documents=docs_for_answer, chat_history=[]
             )
     except KeyError as e:
         logger.exception("stage=llm error=missing_env")
-        raise HTTPException(status_code=500, detail=f"Missing env var: {e}") from e
+        raise HTTPException(
+            status_code=500, detail=f"Missing env var: {e}") from e
     except Exception as e:
         logger.exception("stage=llm error=internal")
         raise HTTPException(status_code=500, detail="LLM failed") from e
@@ -213,12 +233,14 @@ async def ask(payload: AskRequest):
 
     docs_for_answer = llm_result.get("source_documents", docs_for_answer)
     allowed_ids = {id(doc) for doc in docs_for_answer}
+    score_by_id = {id(doc): float(score) for doc, score in results}
     citations: List[Citation] = []
     for i, (doc, score) in enumerate(results):
         if id(doc) not in allowed_ids:
             continue
         metadata = doc.metadata or {}
-        doc_id = str(metadata.get("doc_id") or metadata.get("source") or "unknown")
+        doc_id = str(metadata.get("doc_id")
+                     or metadata.get("source") or "unknown")
         chunk_id = metadata.get("chunk_id", i)
         citations.append(
             Citation(
@@ -227,6 +249,42 @@ async def ask(payload: AskRequest):
                 score=float(score),
                 text_snippet=doc.page_content[:200],
             )
+        )
+
+    note_docs_used = [
+        doc for doc in docs_for_answer if (doc.metadata or {}).get("doc_id")
+    ]
+    if note_docs_used and not citations:
+        doc = note_docs_used[0]
+        metadata = doc.metadata or {}
+        doc_id = str(metadata.get("doc_id") or metadata.get("source") or "unknown")
+        chunk_id = metadata.get("chunk_id", 0)
+        score = score_by_id.get(id(doc), 1.0)
+        citations.append(
+            Citation(
+                doc_id=doc_id,
+                chunk_id=chunk_id,
+                score=float(score),
+                text_snippet=doc.page_content[:200],
+            )
+        )
+
+    min_sources = int(os.environ.get("MIN_SOURCES", "1"))
+    min_top_score = float(os.environ.get("MIN_TOP_SCORE", "0.3"))
+    top_score = max((score for _, score in results), default=0.0)
+    print(min_sources, min_top_score, top_score, len(citations))
+    effective_min_sources = 1 if note_docs_used else min_sources
+    if top_score < min_top_score or len(citations) < effective_min_sources:
+        reason = "low_score" if top_score < min_top_score else "insufficient_sources"
+        logger.info(
+            "stage=guardrail triggered=true reason=%s top_score=%s sources=%s",
+            reason,
+            f"{top_score:.4f}",
+            len(citations),
+        )
+        return AskResponse(
+            answer="Not enough evidence in the provided documents.",
+            citations=[],
         )
 
     answer = llm_result.get("result", "")
