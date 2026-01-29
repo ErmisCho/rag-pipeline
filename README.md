@@ -22,11 +22,16 @@ The goal is to demonstrate a modular, maintainable, and realistic RAG system sim
 - Generates structured answers using Gemini
 - Includes source citations for transparency
 - Clean, modular retrieval pipeline in `backend/core.py`
+- Heuristic reranking and selection in `backend/selection.py`
 
 ### Streamlit Interface
 - Minimal UI for interacting with the RAG system
 - Chat history preservation
 - Clear presentation of answers and sources
+
+### FastAPI Service
+- Exposes ingestion, search, and QA endpoints
+- Container-friendly API for integrating with the UI
 
 ### Engineering Practices
 - Separation of ingestion, retrieval, and UI components
@@ -42,10 +47,13 @@ The goal is to demonstrate a modular, maintainable, and realistic RAG system sim
 Crawling --> Chunking --> Embeddings --> Pinecone Vector Store
                                              |
                                              v
-                                      Retriever + LLM
+                                     Retriever + LLM
                                              |
                                              v
-                                       Streamlit UI
+                                      FastAPI API
+                                             |
+                                             v
+                                      Streamlit UI
 ```
 
 ---
@@ -157,7 +165,7 @@ Run the API server:
 uv run uvicorn api.main:app --host 0.0.0.0 --port 8000
 ```
 
-## Docker (FastAPI)
+## Docker (API + Streamlit)
 
 Build the image:
 
@@ -177,11 +185,28 @@ Run with Docker Compose (auto-loads `.env`):
 docker compose up --build
 ```
 
+If you run Ollama locally, set `OLLAMA_BASE_URL=http://host.docker.internal:11434`
+in `.env` so the containers can reach it.
+
 Streamlit UI:
 
 ```bash
 open http://localhost:8501
 ```
+
+FastAPI docs:
+
+```bash
+open http://localhost:8000/docs
+```
+
+API endpoints (see `/docs` for schemas):
+
+- `GET /health` – health check
+- `POST /ingest` – ingest raw text
+- `POST /search` – semantic search
+- `POST /ask` – answer a question
+- `POST /crawl` – crawl and ingest a URL
 
 Health check:
 
@@ -215,9 +240,7 @@ curl http://localhost:8000/health
 
 ## Future Improvements
 
-- Add Dockerfile for containerized deployment
 - Support additional vector stores (OpenSearch, pgvector)
-- Add retrieval-quality evaluation
+- Add retrieval-quality evaluation benchmarks
 - Add automated tests for ingestion and retrieval
 - Add background tasks for large-scale ingestion
-- Optionally expose a FastAPI backend
