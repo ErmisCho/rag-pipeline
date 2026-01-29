@@ -139,12 +139,25 @@ async def ask(payload: AskRequest):
 
     llm_start = time.perf_counter()
     try:
+        query_terms = set(re.findall(r"[a-zA-Z]{3,}", payload.query.lower()))
+        reranked_results = []
+        for doc, score in results:
+            metadata = doc.metadata or {}
+            source = str(metadata.get("source") or metadata.get("doc_id") or "")
+            source_lower = source.lower()
+            content_lower = (doc.page_content or "").lower()
+            term_hits = sum(1 for term in query_terms if term in content_lower)
+            bonus = 0.02 * term_hits
+            if "overview" in source_lower and "langchain" in source_lower:
+                bonus += 0.15
+            reranked_results.append((doc, score + bonus))
+        results = sorted(reranked_results, key=lambda item: item[1], reverse=True)
+
         note_threshold = float(os.environ.get("NOTE_SCORE_THRESHOLD", "0.6"))
         note_margin = float(os.environ.get("NOTE_SCORE_MARGIN", "0.05"))
         note_docs = []
         best_note_score = None
         best_other_score = None
-        query_terms = set(re.findall(r"[a-zA-Z]{3,}", payload.query.lower()))
         for doc, score in results:
             if (doc.metadata or {}).get("doc_id"):
                 note_docs.append(doc)
@@ -162,10 +175,32 @@ async def ask(payload: AskRequest):
             and (best_other_score is None or best_note_score >= best_other_score + note_margin)
             and note_term_match
         )
-        docs_for_answer = note_docs if use_notes_only else [doc for doc, _ in results]
+        docs_for_answer = note_docs if use_notes_only else [doc for doc, _ in results[:4]]
         llm_result = answer_with_docs(
             payload.query, documents=docs_for_answer, chat_history=[]
         )
+        answer_text = str(llm_result.get("result", "")).strip()
+        answer_lower = answer_text.lower()
+        has_term_overlap = any(term in answer_lower for term in query_terms) if query_terms else True
+        if (len(answer_text) < 40) or (not has_term_overlap):
+            retry_top_k = max(payload.top_k * 2, 20)
+            retry_results = search_docs(payload.query, top_k=retry_top_k)
+            reranked_retry = []
+            for doc, score in retry_results:
+                metadata = doc.metadata or {}
+                source = str(metadata.get("source") or metadata.get("doc_id") or "")
+                source_lower = source.lower()
+                content_lower = (doc.page_content or "").lower()
+                term_hits = sum(1 for term in query_terms if term in content_lower)
+                bonus = 0.02 * term_hits
+                if "overview" in source_lower and "langchain" in source_lower:
+                    bonus += 0.15
+                reranked_retry.append((doc, score + bonus))
+            reranked_retry = sorted(reranked_retry, key=lambda item: item[1], reverse=True)
+            docs_for_answer = [doc for doc, _ in reranked_retry[:6]]
+            llm_result = answer_with_docs(
+                payload.query, documents=docs_for_answer, chat_history=[]
+            )
     except KeyError as e:
         logger.exception("stage=llm error=missing_env")
         raise HTTPException(status_code=500, detail=f"Missing env var: {e}") from e
@@ -176,6 +211,7 @@ async def ask(payload: AskRequest):
     llm_latency_ms = int((time.perf_counter() - llm_start) * 1000)
     logger.info(f"stage=llm latency_ms={llm_latency_ms}")
 
+    docs_for_answer = llm_result.get("source_documents", docs_for_answer)
     allowed_ids = {id(doc) for doc in docs_for_answer}
     citations: List[Citation] = []
     for i, (doc, score) in enumerate(results):

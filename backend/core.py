@@ -24,7 +24,8 @@ def get_llm():
     if provider == "ollama":
         return ChatOllama(
             model=os.environ.get("OLLAMA_MODEL", "qwen3-coder:latest"),
-            base_url=os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434"),
+            base_url=os.environ.get(
+                "OLLAMA_BASE_URL", "http://localhost:11434"),
             temperature=0,
         )
     return ChatGoogleGenerativeAI(
@@ -117,13 +118,26 @@ def answer_with_docs(
             "result": note_docs[0].page_content.strip(),
             "source_documents": ordered_docs,
         }
+    if note_docs:
+        query_lower = query.lower()
+        for doc in note_docs:
+            doc_id = str((doc.metadata or {}).get("doc_id") or "").strip()
+            if doc_id and doc_id.lower() in query_lower:
+                return {
+                    "query": query,
+                    "result": doc.page_content.strip(),
+                    "source_documents": ordered_docs,
+                }
+        # No note matched the query; drop notes from context to avoid pollution.
+        ordered_docs = other_docs
 
     chat = get_llm()
 
     template = """
     You are a helpful documentation assistant.
 
-    Use the context to answer the question in 2-4 sentences.
+    Use the context to answer the question in 100 tokens max and minimum 4 sentences.
+    When multiple sources are available, synthesize from at least four distinct sources.
     If the context includes a user note (identified by doc_id) that answers the question,
     restate the note as the answer. Do not mention note IDs or describe your reasoning process.
     Do not invent identifiers or details not present in the context.
