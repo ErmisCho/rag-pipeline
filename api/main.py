@@ -1,7 +1,6 @@
 import contextvars
 import logging
 import os
-import re
 import time
 import uuid
 from typing import List
@@ -10,6 +9,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from backend.core import answer_with_docs, run_llm, search_docs
+from backend.selection import run_answer_with_selection_and_retry
 from backend.ingestion import crawl_and_ingest, ingest_text
 from .schemas import (
     AskRequest,
@@ -37,7 +37,7 @@ def setup_logging() -> logging.Logger:
     logger = logging.getLogger("api")
     if logger.handlers:
         return logger
-    logger.setLevel(logging.INFO)
+    logger.setLevel(logging.DEBUG)
     handler = logging.StreamHandler()
     formatter = logging.Formatter(
         "%(asctime)s %(levelname)s request_id=%(request_id)s %(message)s"
@@ -149,77 +149,27 @@ async def ask(payload: AskRequest):
 
     llm_start = time.perf_counter()
     try:
-        query_terms = set(re.findall(r"[a-zA-Z]{3,}", payload.query.lower()))
-        reranked_results = []
-        for doc, score in results:
-            metadata = doc.metadata or {}
-            source = str(metadata.get("source")
-                         or metadata.get("doc_id") or "")
-            source_lower = source.lower()
-            content_lower = (doc.page_content or "").lower()
-            term_hits = sum(1 for term in query_terms if term in content_lower)
-            bonus = 0.02 * term_hits
-            if "overview" in source_lower and "langchain" in source_lower:
-                bonus += 0.15
-            reranked_results.append((doc, score + bonus))
-        results = sorted(reranked_results,
-                         key=lambda item: item[1], reverse=True)
-
         note_threshold = float(os.environ.get("NOTE_SCORE_THRESHOLD", "0.6"))
         note_margin = float(os.environ.get("NOTE_SCORE_MARGIN", "0.05"))
-        note_docs = []
-        best_note_score = None
-        best_other_score = None
-        for doc, score in results:
-            if (doc.metadata or {}).get("doc_id"):
-                note_docs.append(doc)
-                best_note_score = score if best_note_score is None else max(
-                    best_note_score, score)
-            else:
-                best_other_score = score if best_other_score is None else max(
-                    best_other_score, score)
-        note_term_match = any(
-            term in (doc.page_content or "").lower()
-            for doc in note_docs
-            for term in query_terms
-        ) if query_terms else False
-        use_notes_only = (
-            best_note_score is not None
-            and best_note_score >= note_threshold
-            and (best_other_score is None or best_note_score >= best_other_score + note_margin)
-            and note_term_match
+        llm_result, docs_for_answer, results = run_answer_with_selection_and_retry(
+            query=payload.query,
+            results=results,
+            note_threshold=note_threshold,
+            note_margin=note_margin,
+            max_docs=4,
+            answer_fn=lambda docs: answer_with_docs(
+                payload.query,
+                documents=docs,
+                chat_history=[],
+            ),
+            retry_search_fn=search_docs,
+            retry_top_ks=[
+                max(payload.top_k * 2, 20),
+                max(payload.top_k * 3, 30),
+            ],
+            retry_max_docs=6,
+            debug_log=logger.debug,
         )
-        docs_for_answer = note_docs if use_notes_only else [
-            doc for doc, _ in results[:4]]
-        llm_result = answer_with_docs(
-            payload.query, documents=docs_for_answer, chat_history=[]
-        )
-        answer_text = str(llm_result.get("result", "")).strip()
-        answer_lower = answer_text.lower()
-        has_term_overlap = any(
-            term in answer_lower for term in query_terms) if query_terms else True
-        if (len(answer_text) < 40) or (not has_term_overlap):
-            retry_top_k = max(payload.top_k * 2, 20)
-            retry_results = search_docs(payload.query, top_k=retry_top_k)
-            reranked_retry = []
-            for doc, score in retry_results:
-                metadata = doc.metadata or {}
-                source = str(metadata.get("source")
-                             or metadata.get("doc_id") or "")
-                source_lower = source.lower()
-                content_lower = (doc.page_content or "").lower()
-                term_hits = sum(
-                    1 for term in query_terms if term in content_lower)
-                bonus = 0.02 * term_hits
-                if "overview" in source_lower and "langchain" in source_lower:
-                    bonus += 0.15
-                reranked_retry.append((doc, score + bonus))
-            reranked_retry = sorted(
-                reranked_retry, key=lambda item: item[1], reverse=True)
-            docs_for_answer = [doc for doc, _ in reranked_retry[:6]]
-            llm_result = answer_with_docs(
-                payload.query, documents=docs_for_answer, chat_history=[]
-            )
     except KeyError as e:
         logger.exception("stage=llm error=missing_env")
         raise HTTPException(
@@ -257,7 +207,8 @@ async def ask(payload: AskRequest):
     if note_docs_used and not citations:
         doc = note_docs_used[0]
         metadata = doc.metadata or {}
-        doc_id = str(metadata.get("doc_id") or metadata.get("source") or "unknown")
+        doc_id = str(metadata.get("doc_id")
+                     or metadata.get("source") or "unknown")
         chunk_id = metadata.get("chunk_id", 0)
         score = score_by_id.get(id(doc), 1.0)
         citations.append(
@@ -272,7 +223,6 @@ async def ask(payload: AskRequest):
     min_sources = int(os.environ.get("MIN_SOURCES", "1"))
     min_top_score = float(os.environ.get("MIN_TOP_SCORE", "0.3"))
     top_score = max((score for _, score in results), default=0.0)
-    print(min_sources, min_top_score, top_score, len(citations))
     effective_min_sources = 1 if note_docs_used else min_sources
     if top_score < min_top_score or len(citations) < effective_min_sources:
         reason = "low_score" if top_score < min_top_score else "insufficient_sources"
