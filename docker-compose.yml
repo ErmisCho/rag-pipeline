@@ -6,6 +6,7 @@ services:
       - .env
     environment:
       OLLAMA_BASE_URL: http://host.docker.internal:11434
+      RABBITMQ_HOST: rabbitmq
     depends_on:
       - rabbitmq
     ports:
@@ -21,6 +22,17 @@ services:
       - "15672:15672"
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
+  worker:
+    build: .
+    image: rag-api
+    env_file:
+      - .env
+    environment:
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+      RABBITMQ_HOST: rabbitmq
+    command: ["uv", "run", "python", "-m", "backend.worker"]
+    depends_on:
+      - rabbitmq
   streamlit:
     build: .
     image: rag-api

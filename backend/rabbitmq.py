@@ -82,6 +82,23 @@ def build_connection_parameters(
     )
 
 
+def parse_ingest_job_message(body: bytes | str) -> IngestJobMessage:
+    raw_message = body.decode("utf-8") if isinstance(body, bytes) else body
+    data = json.loads(raw_message)
+    payload = data["payload"]
+    return IngestJobMessage(
+        job_id=data["job_id"],
+        submitted_at=data["submitted_at"],
+        kind=data.get("kind", "ingest_document"),
+        version=int(data.get("version", 1)),
+        payload=IngestJobPayload(
+            doc_id=payload["doc_id"],
+            text=payload["text"],
+            metadata=payload.get("metadata") or {},
+        ),
+    )
+
+
 def publish_ingest_job(
     *,
     doc_id: str,

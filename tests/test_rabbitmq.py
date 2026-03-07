@@ -5,6 +5,7 @@ from backend.rabbitmq import (
     build_connection_parameters,
     build_ingest_job_message,
     load_rabbitmq_settings,
+    parse_ingest_job_message,
 )
 
 
@@ -64,3 +65,20 @@ def test_build_connection_parameters_uses_settings():
     assert params.host == "rabbitmq"
     assert params.port == 5672
     assert params.virtual_host == "/"
+
+
+def test_parse_ingest_job_message_round_trips_payload():
+    message = build_ingest_job_message(
+        doc_id="doc-123",
+        text="hello world",
+        metadata={"source": "manual"},
+        job_id="job-123",
+    )
+
+    parsed = parse_ingest_job_message(message.to_json().encode("utf-8"))
+
+    assert parsed.job_id == "job-123"
+    assert parsed.kind == "ingest_document"
+    assert parsed.payload.doc_id == "doc-123"
+    assert parsed.payload.text == "hello world"
+    assert parsed.payload.metadata == {"source": "manual"}
