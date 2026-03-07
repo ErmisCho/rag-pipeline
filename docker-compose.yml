@@ -6,8 +6,21 @@ services:
       - .env
     environment:
       OLLAMA_BASE_URL: http://host.docker.internal:11434
+    depends_on:
+      - rabbitmq
     ports:
       - "8000:8000"
+  rabbitmq:
+    image: rabbitmq:3-management
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:?Set RABBITMQ_USER in .env}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD in .env}
+      RABBITMQ_DEFAULT_VHOST: ${RABBITMQ_VHOST:?Set RABBITMQ_VHOST in .env}
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
   streamlit:
     build: .
     image: rag-api
@@ -32,3 +45,6 @@ services:
       - "8501:8501"
     depends_on:
       - api
+
+volumes:
+  rabbitmq_data:
