@@ -15,7 +15,8 @@ class IngestRequest(BaseModel):
 
 class IngestResponse(BaseModel):
     status: str
-    chunks: int
+    job_id: str
+    queue: str
 
 
 class SearchRequest(BaseModel):

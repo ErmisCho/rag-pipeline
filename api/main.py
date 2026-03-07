@@ -9,8 +9,9 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from backend.core import answer_with_docs, run_llm, search_docs
+from backend.ingestion import crawl_and_ingest
+from backend.rabbitmq import load_rabbitmq_settings, publish_ingest_job
 from backend.selection import run_answer_with_selection_and_retry
-from backend.ingestion import crawl_and_ingest, ingest_text
 from .schemas import (
     AskRequest,
     AskResponse,
@@ -71,14 +72,16 @@ async def health():
     return HealthResponse()
 
 
-@app.post("/ingest", response_model=IngestResponse)
+@app.post("/ingest", response_model=IngestResponse, status_code=202)
 async def ingest(payload: IngestRequest):
     start = time.perf_counter()
     try:
-        chunks = await ingest_text(
+        settings = load_rabbitmq_settings()
+        message = publish_ingest_job(
             doc_id=payload.doc_id,
             text=payload.text,
             metadata=payload.metadata,
+            settings=settings,
         )
     except KeyError as e:
         logger.exception("stage=ingest error=missing_env")
@@ -86,17 +89,21 @@ async def ingest(payload: IngestRequest):
             status_code=500, detail=f"Missing env var: {e}") from e
     except Exception as e:
         logger.exception("stage=ingest error=internal")
-        raise HTTPException(status_code=500, detail="Ingest failed") from e
+        raise HTTPException(status_code=500, detail="Ingest enqueue failed") from e
 
     latency_ms = int((time.perf_counter() - start) * 1000)
-    # Log counts only to avoid large/PII payloads.
     logger.info(
-        "stage=ingest latency_ms=%s chunks_count=%s doc_id=%s",
+        "stage=ingest queued=true latency_ms=%s queue=%s doc_id=%s job_id=%s",
         latency_ms,
-        chunks,
+        settings.queue_ingest,
         payload.doc_id,
+        message.job_id,
     )
-    return IngestResponse(status="ok", chunks=chunks)
+    return IngestResponse(
+        status="queued",
+        job_id=message.job_id,
+        queue=settings.queue_ingest,
+    )
 
 
 @app.post("/search", response_model=SearchResponse)
