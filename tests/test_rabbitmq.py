@@ -1,11 +1,13 @@
 import json
 
 from backend.rabbitmq import (
+    CrawlJobMessage,
     RabbitMQSettings,
     build_connection_parameters,
+    build_crawl_job_message,
     build_ingest_job_message,
     load_rabbitmq_settings,
-    parse_ingest_job_message,
+    parse_job_message,
 )
 
 
@@ -75,10 +77,28 @@ def test_parse_ingest_job_message_round_trips_payload():
         job_id="job-123",
     )
 
-    parsed = parse_ingest_job_message(message.to_json().encode("utf-8"))
+    parsed = parse_job_message(message.to_json().encode("utf-8"))
 
     assert parsed.job_id == "job-123"
     assert parsed.kind == "ingest_document"
     assert parsed.payload.doc_id == "doc-123"
     assert parsed.payload.text == "hello world"
     assert parsed.payload.metadata == {"source": "manual"}
+
+
+def test_parse_crawl_job_message_round_trips_payload():
+    message = build_crawl_job_message(
+        url="https://docs.example.com",
+        max_depth=3,
+        extract_depth="advanced",
+        job_id="job-456",
+    )
+
+    parsed = parse_job_message(message.to_json())
+
+    assert isinstance(parsed, CrawlJobMessage)
+    assert parsed.job_id == "job-456"
+    assert parsed.kind == "crawl_documentation"
+    assert parsed.payload.url == "https://docs.example.com"
+    assert parsed.payload.max_depth == 3
+    assert parsed.payload.extract_depth == "advanced"

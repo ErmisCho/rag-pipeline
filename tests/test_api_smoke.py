@@ -72,3 +72,42 @@ def test_ingest_enqueues_job(monkeypatch):
         "job_id": "job-123",
         "queue": "ingest",
     }
+
+
+def test_crawl_enqueues_job(monkeypatch):
+    class FakeMessage:
+        job_id = "job-456"
+
+    class FakeSettings:
+        queue_ingest = "ingest"
+
+    def fake_load_rabbitmq_settings():
+        return FakeSettings()
+
+    def fake_publish_crawl_job(*, url: str, max_depth: int, extract_depth: str, settings=None):
+        assert url == "https://docs.example.com"
+        assert max_depth == 3
+        assert extract_depth == "advanced"
+        assert settings is not None
+        return FakeMessage()
+
+    monkeypatch.setattr(api_main, "load_rabbitmq_settings", fake_load_rabbitmq_settings)
+    monkeypatch.setattr(api_main, "publish_crawl_job", fake_publish_crawl_job)
+
+    client = TestClient(api_main.app)
+    response = client.post(
+        "/crawl",
+        json={
+            "url": "https://docs.example.com",
+            "max_depth": 3,
+            "extract_depth": "advanced",
+        },
+    )
+
+    assert response.status_code == 202
+    data = response.json()
+    assert data == {
+        "status": "queued",
+        "job_id": "job-456",
+        "queue": "ingest",
+    }

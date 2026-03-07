@@ -3,41 +3,63 @@ from typing import Any
 
 import pika
 
-from .ingestion import ingest_text
+from .ingestion import crawl_and_ingest, ingest_text
 from .logger import get_logger
 from .rabbitmq import (
     build_connection_parameters,
     load_rabbitmq_settings,
-    parse_ingest_job_message,
+    parse_job_message,
 )
 
 logger = get_logger(__name__)
 
 
 def _handle_delivery(body: bytes) -> None:
-    message = parse_ingest_job_message(body)
+    message = parse_job_message(body)
 
-    if message.kind != "ingest_document":
-        raise ValueError(f"Unsupported job kind: {message.kind}")
-
-    logger.info(
-        "worker received job_id=%s kind=%s doc_id=%s",
-        message.job_id,
-        message.kind,
-        message.payload.doc_id,
-    )
-    asyncio.run(
-        ingest_text(
-            doc_id=message.payload.doc_id,
-            text=message.payload.text,
-            metadata=message.payload.metadata,
+    if message.kind == "ingest_document":
+        logger.info(
+            "worker received job_id=%s kind=%s doc_id=%s",
+            message.job_id,
+            message.kind,
+            message.payload.doc_id,
         )
-    )
-    logger.info(
-        "worker completed job_id=%s doc_id=%s",
-        message.job_id,
-        message.payload.doc_id,
-    )
+        asyncio.run(
+            ingest_text(
+                doc_id=message.payload.doc_id,
+                text=message.payload.text,
+                metadata=message.payload.metadata,
+            )
+        )
+        logger.info(
+            "worker completed job_id=%s doc_id=%s",
+            message.job_id,
+            message.payload.doc_id,
+        )
+        return
+
+    if message.kind == "crawl_documentation":
+        logger.info(
+            "worker received job_id=%s kind=%s url=%s",
+            message.job_id,
+            message.kind,
+            message.payload.url,
+        )
+        asyncio.run(
+            crawl_and_ingest(
+                url=message.payload.url,
+                max_depth=message.payload.max_depth,
+                extract_depth=message.payload.extract_depth,
+            )
+        )
+        logger.info(
+            "worker completed job_id=%s url=%s",
+            message.job_id,
+            message.payload.url,
+        )
+        return
+
+    raise ValueError(f"Unsupported job kind: {message.kind}")
 
 
 def run_worker() -> None:

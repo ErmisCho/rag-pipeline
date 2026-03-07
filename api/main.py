@@ -9,8 +9,11 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from backend.core import answer_with_docs, run_llm, search_docs
-from backend.ingestion import crawl_and_ingest
-from backend.rabbitmq import load_rabbitmq_settings, publish_ingest_job
+from backend.rabbitmq import (
+    load_rabbitmq_settings,
+    publish_crawl_job,
+    publish_ingest_job,
+)
 from backend.selection import run_answer_with_selection_and_retry
 from .schemas import (
     AskRequest,
@@ -248,30 +251,33 @@ async def ask(payload: AskRequest):
     return AskResponse(answer=answer, citations=citations)
 
 
-@app.post("/crawl", response_model=CrawlResponse)
+@app.post("/crawl", response_model=CrawlResponse, status_code=202)
 async def crawl(payload: CrawlRequest):
     start = time.perf_counter()
     try:
-        stats = await crawl_and_ingest(
+        settings = load_rabbitmq_settings()
+        message = publish_crawl_job(
             url=payload.url,
             max_depth=payload.max_depth,
             extract_depth=payload.extract_depth,
+            settings=settings,
         )
     except Exception as e:
         logger.exception("stage=crawl error=internal")
-        raise HTTPException(status_code=500, detail="Crawl failed") from e
+        raise HTTPException(status_code=500, detail="Crawl enqueue failed") from e
 
     latency_ms = int((time.perf_counter() - start) * 1000)
     logger.info(
-        "stage=crawl latency_ms=%s documents=%s chunks=%s",
+        "stage=crawl queued=true latency_ms=%s queue=%s url=%s job_id=%s",
         latency_ms,
-        stats["documents"],
-        stats["chunks"],
+        settings.queue_ingest,
+        payload.url,
+        message.job_id,
     )
     return CrawlResponse(
-        status="ok",
-        documents=stats["documents"],
-        chunks=stats["chunks"],
+        status="queued",
+        job_id=message.job_id,
+        queue=settings.queue_ingest,
     )
 
 

@@ -53,5 +53,5 @@ class CrawlRequest(BaseModel):
 
 class CrawlResponse(BaseModel):
     status: str
-    documents: int
-    chunks: int
+    job_id: str
+    queue: str

@@ -26,11 +26,30 @@ class IngestJobPayload:
 
 
 @dataclass(frozen=True)
+class CrawlJobPayload:
+    url: str
+    max_depth: int
+    extract_depth: str
+
+
+@dataclass(frozen=True)
 class IngestJobMessage:
     job_id: str
     submitted_at: str
     payload: IngestJobPayload
     kind: str = "ingest_document"
+    version: int = 1
+
+    def to_json(self) -> str:
+        return json.dumps(asdict(self), separators=(",", ":"), sort_keys=True)
+
+
+@dataclass(frozen=True)
+class CrawlJobMessage:
+    job_id: str
+    submitted_at: str
+    payload: CrawlJobPayload
+    kind: str = "crawl_documentation"
     version: int = 1
 
     def to_json(self) -> str:
@@ -82,14 +101,47 @@ def build_connection_parameters(
     )
 
 
-def parse_ingest_job_message(body: bytes | str) -> IngestJobMessage:
+def build_crawl_job_message(
+    *,
+    url: str,
+    max_depth: int,
+    extract_depth: str,
+    job_id: Optional[str] = None,
+) -> CrawlJobMessage:
+    return CrawlJobMessage(
+        job_id=job_id or str(uuid.uuid4()),
+        submitted_at=datetime.now(UTC).isoformat(),
+        payload=CrawlJobPayload(
+            url=url,
+            max_depth=max_depth,
+            extract_depth=extract_depth,
+        ),
+    )
+
+
+def parse_job_message(body: bytes | str) -> IngestJobMessage | CrawlJobMessage:
     raw_message = body.decode("utf-8") if isinstance(body, bytes) else body
     data = json.loads(raw_message)
     payload = data["payload"]
+    kind = data.get("kind", "ingest_document")
+
+    if kind == "crawl_documentation":
+        return CrawlJobMessage(
+            job_id=data["job_id"],
+            submitted_at=data["submitted_at"],
+            kind=kind,
+            version=int(data.get("version", 1)),
+            payload=CrawlJobPayload(
+                url=payload["url"],
+                max_depth=int(payload["max_depth"]),
+                extract_depth=payload["extract_depth"],
+            ),
+        )
+
     return IngestJobMessage(
         job_id=data["job_id"],
         submitted_at=data["submitted_at"],
-        kind=data.get("kind", "ingest_document"),
+        kind=kind,
         version=int(data.get("version", 1)),
         payload=IngestJobPayload(
             doc_id=payload["doc_id"],
@@ -112,6 +164,44 @@ def publish_ingest_job(
         doc_id=doc_id,
         text=text,
         metadata=metadata,
+        job_id=job_id,
+    )
+
+    connection = pika.BlockingConnection(build_connection_parameters(resolved))
+    try:
+        channel = connection.channel()
+        channel.queue_declare(queue=resolved.queue_ingest, durable=True)
+        channel.basic_publish(
+            exchange="",
+            routing_key=resolved.queue_ingest,
+            body=message.to_json(),
+            properties=pika.BasicProperties(
+                content_type="application/json",
+                delivery_mode=2,
+                message_id=message.job_id,
+                timestamp=int(datetime.now(UTC).timestamp()),
+                type=message.kind,
+            ),
+        )
+    finally:
+        connection.close()
+
+    return message
+
+
+def publish_crawl_job(
+    *,
+    url: str,
+    max_depth: int,
+    extract_depth: str,
+    settings: Optional[RabbitMQSettings] = None,
+    job_id: Optional[str] = None,
+) -> CrawlJobMessage:
+    resolved = settings or load_rabbitmq_settings()
+    message = build_crawl_job_message(
+        url=url,
+        max_depth=max_depth,
+        extract_depth=extract_depth,
         job_id=job_id,
     )
 
