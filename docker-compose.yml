@@ -7,12 +7,32 @@ services:
     environment:
       OLLAMA_BASE_URL: http://host.docker.internal:11434
       RABBITMQ_HOST: rabbitmq
+      REDIS_HOST: redis
     depends_on:
-      - rabbitmq
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     ports:
       - "8000:8000"
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
   rabbitmq:
     image: rabbitmq:3-management
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:?Set RABBITMQ_USER in .env}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD in .env}
@@ -30,9 +50,14 @@ services:
     environment:
       OLLAMA_BASE_URL: http://host.docker.internal:11434
       RABBITMQ_HOST: rabbitmq
+      REDIS_HOST: redis
     command: ["uv", "run", "python", "-m", "backend.worker"]
+    restart: unless-stopped
     depends_on:
-      - rabbitmq
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
   streamlit:
     build: .
     image: rag-api
@@ -60,3 +85,4 @@ services:
 
 volumes:
   rabbitmq_data:
+  redis_data:

@@ -13,10 +13,18 @@ class IngestRequest(BaseModel):
     metadata: Optional[Dict[str, Any]] = None
 
 
-class IngestResponse(BaseModel):
-    status: str
+class JobStatusResponse(BaseModel):
     job_id: str
+    kind: str
+    status: str
     queue: str
+    created_at: str
+    updated_at: str
+    error: Optional[str] = None
+
+
+class IngestResponse(JobStatusResponse):
+    pass
 
 
 class SearchRequest(BaseModel):
@@ -51,7 +59,5 @@ class CrawlRequest(BaseModel):
     extract_depth: str = Field("advanced")
 
 
-class CrawlResponse(BaseModel):
-    status: str
-    job_id: str
-    queue: str
+class CrawlResponse(JobStatusResponse):
+    pass

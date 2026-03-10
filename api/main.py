@@ -8,8 +8,11 @@ from typing import List
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
+from backend.jobs import RedisJobStatusStore
 from backend.core import answer_with_docs, run_llm, search_docs
 from backend.rabbitmq import (
+    build_crawl_job_message,
+    build_ingest_job_message,
     load_rabbitmq_settings,
     publish_crawl_job,
     publish_ingest_job,
@@ -24,6 +27,7 @@ from .schemas import (
     HealthResponse,
     IngestRequest,
     IngestResponse,
+    JobStatusResponse,
     SearchRequest,
     SearchResponse,
 )
@@ -75,17 +79,42 @@ async def health():
     return HealthResponse()
 
 
+@app.get("/jobs/{job_id}", response_model=JobStatusResponse)
+async def get_job(job_id: str):
+    store = RedisJobStatusStore()
+    record = store.get_job(job_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return JobStatusResponse(**vars(record))
+
+
 @app.post("/ingest", response_model=IngestResponse, status_code=202)
 async def ingest(payload: IngestRequest):
     start = time.perf_counter()
     try:
         settings = load_rabbitmq_settings()
-        message = publish_ingest_job(
+        message = build_ingest_job_message(
             doc_id=payload.doc_id,
             text=payload.text,
             metadata=payload.metadata,
-            settings=settings,
         )
+        store = RedisJobStatusStore()
+        record = store.create_job(
+            job_id=message.job_id,
+            kind=message.kind,
+            queue=settings.queue_ingest,
+        )
+        try:
+            publish_ingest_job(
+                doc_id=payload.doc_id,
+                text=payload.text,
+                metadata=payload.metadata,
+                settings=settings,
+                job_id=message.job_id,
+            )
+        except Exception as exc:
+            store.update_job(job_id=message.job_id, status="failed", error=str(exc))
+            raise
     except KeyError as e:
         logger.exception("stage=ingest error=missing_env")
         raise HTTPException(
@@ -102,11 +131,7 @@ async def ingest(payload: IngestRequest):
         payload.doc_id,
         message.job_id,
     )
-    return IngestResponse(
-        status="queued",
-        job_id=message.job_id,
-        queue=settings.queue_ingest,
-    )
+    return IngestResponse(**vars(record))
 
 
 @app.post("/search", response_model=SearchResponse)
@@ -256,12 +281,28 @@ async def crawl(payload: CrawlRequest):
     start = time.perf_counter()
     try:
         settings = load_rabbitmq_settings()
-        message = publish_crawl_job(
+        message = build_crawl_job_message(
             url=payload.url,
             max_depth=payload.max_depth,
             extract_depth=payload.extract_depth,
-            settings=settings,
         )
+        store = RedisJobStatusStore()
+        record = store.create_job(
+            job_id=message.job_id,
+            kind=message.kind,
+            queue=settings.queue_ingest,
+        )
+        try:
+            publish_crawl_job(
+                url=payload.url,
+                max_depth=payload.max_depth,
+                extract_depth=payload.extract_depth,
+                settings=settings,
+                job_id=message.job_id,
+            )
+        except Exception as exc:
+            store.update_job(job_id=message.job_id, status="failed", error=str(exc))
+            raise
     except Exception as e:
         logger.exception("stage=crawl error=internal")
         raise HTTPException(status_code=500, detail="Crawl enqueue failed") from e
@@ -274,11 +315,7 @@ async def crawl(payload: CrawlRequest):
         payload.url,
         message.job_id,
     )
-    return CrawlResponse(
-        status="queued",
-        job_id=message.job_id,
-        queue=settings.queue_ingest,
-    )
+    return CrawlResponse(**vars(record))
 
 
 @app.exception_handler(HTTPException)

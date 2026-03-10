@@ -188,8 +188,8 @@ docker compose up --build
 By default, local runs use `http://localhost:11434`. Docker Compose overrides
 `OLLAMA_BASE_URL` to `http://host.docker.internal:11434` so containers reach
 your host Ollama without changing `.env`. Local Docker Compose now also starts
-RabbitMQ for future background-job integration, and a separate worker service
-is included to consume queued ingest jobs when publishing is wired in.
+RabbitMQ, Redis, and a separate worker service for queued ingestion jobs and job
+status tracking.
 
 RabbitMQ management UI:
 
@@ -212,6 +212,7 @@ open http://localhost:8000/docs
 API endpoints (see `/docs` for schemas):
 
 - `GET /health` – health check
+- `GET /jobs/{job_id}` – fetch queued job status
 - `POST /ingest` – ingest raw text
 - `POST /search` – semantic search
 - `POST /ask` – answer a question

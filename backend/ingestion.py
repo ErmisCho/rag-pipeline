@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 import re
 from html import unescape
@@ -66,6 +67,30 @@ def _is_low_value(text: str) -> bool:
     return alpha_chars < 100
 
 
+def _normalize_metadata_value(value: Any) -> Any:
+    if value is None:
+        return None
+    if isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, list):
+        if all(isinstance(item, str) for item in value):
+            return value
+        return json.dumps(value, separators=(",", ":"), sort_keys=True)
+    if isinstance(value, dict):
+        return json.dumps(value, separators=(",", ":"), sort_keys=True)
+    return str(value)
+
+
+def _normalize_metadata(metadata: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    normalized: Dict[str, Any] = {}
+    for key, value in (metadata or {}).items():
+        normalized_value = _normalize_metadata_value(value)
+        if normalized_value is None:
+            continue
+        normalized[str(key)] = normalized_value
+    return normalized
+
+
 def _chunk_config() -> Tuple[int, int]:
     chunk_size = int(os.environ.get("CHUNK_SIZE", "1200"))
     chunk_overlap = int(os.environ.get("CHUNK_OVERLAP", "150"))
@@ -118,7 +143,7 @@ async def ingest_text(
     batch_size: Optional[int] = None,
 ) -> int:
     logger.info("INGEST TEXT")
-    base_metadata = metadata or {}
+    base_metadata = _normalize_metadata(metadata)
     source = base_metadata.get("source", doc_id)
     split_docs = chunk_text(text, allow_short=True)
     for i, doc in enumerate(split_docs):
@@ -197,6 +222,9 @@ async def index_documents_async(
     else:
         logger.info(
             f"VectorStore Indexing: Processed {successful}/{len(batches)} batches successfully"
+        )
+        raise RuntimeError(
+            f"Vector store indexing failed for {len(batches) - successful} of {len(batches)} batches"
         )
 
 
