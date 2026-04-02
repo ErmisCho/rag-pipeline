@@ -116,11 +116,19 @@ def test_ingest_enqueues_job(monkeypatch):
                 error=error,
             )
 
-    def fake_publish_ingest_job(*, doc_id: str, text: str, metadata=None, settings=None):
+    def fake_publish_ingest_job(
+        *,
+        doc_id: str,
+        text: str,
+        metadata=None,
+        settings=None,
+        job_id=None,
+    ):
         assert doc_id == "doc-123"
         assert text == "hello world"
         assert metadata == {"source": "manual"}
         assert settings is not None
+        assert job_id == "job-123"
     monkeypatch.setattr(api_main, "load_rabbitmq_settings", fake_load_rabbitmq_settings)
     monkeypatch.setattr(api_main, "build_ingest_job_message", lambda **kwargs: type(
         "FakeBuiltMessage",
@@ -186,11 +194,19 @@ def test_crawl_enqueues_job(monkeypatch):
                 error=error,
             )
 
-    def fake_publish_crawl_job(*, url: str, max_depth: int, extract_depth: str, settings=None):
+    def fake_publish_crawl_job(
+        *,
+        url: str,
+        max_depth: int,
+        extract_depth: str,
+        settings=None,
+        job_id=None,
+    ):
         assert url == "https://docs.example.com"
         assert max_depth == 3
         assert extract_depth == "advanced"
         assert settings is not None
+        assert job_id == "job-456"
     monkeypatch.setattr(api_main, "load_rabbitmq_settings", fake_load_rabbitmq_settings)
     monkeypatch.setattr(api_main, "build_crawl_job_message", lambda **kwargs: type(
         "FakeBuiltMessage",

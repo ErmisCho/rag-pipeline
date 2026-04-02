@@ -7,6 +7,9 @@ services:
     environment:
       OLLAMA_BASE_URL: http://host.docker.internal:11434
       RABBITMQ_HOST: rabbitmq
+      RABBITMQ_QUEUE_INGEST: ${RABBITMQ_QUEUE_INGEST:-ingest}
+      RABBITMQ_EXCHANGE_DEAD_LETTER: ${RABBITMQ_EXCHANGE_DEAD_LETTER:-ingest.dead_letter}
+      RABBITMQ_QUEUE_INGEST_FAILED: ${RABBITMQ_QUEUE_INGEST_FAILED:-ingest.failed}
       REDIS_HOST: redis
     depends_on:
       rabbitmq:
@@ -50,6 +53,9 @@ services:
     environment:
       OLLAMA_BASE_URL: http://host.docker.internal:11434
       RABBITMQ_HOST: rabbitmq
+      RABBITMQ_QUEUE_INGEST: ${RABBITMQ_QUEUE_INGEST:-ingest}
+      RABBITMQ_EXCHANGE_DEAD_LETTER: ${RABBITMQ_EXCHANGE_DEAD_LETTER:-ingest.dead_letter}
+      RABBITMQ_QUEUE_INGEST_FAILED: ${RABBITMQ_QUEUE_INGEST_FAILED:-ingest.failed}
       REDIS_HOST: redis
     command: ["uv", "run", "python", "-m", "backend.worker"]
     restart: unless-stopped

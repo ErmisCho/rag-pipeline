@@ -10,6 +10,7 @@ from .jobs import RedisJobStatusStore
 from .logger import get_logger
 from .rabbitmq import (
     build_connection_parameters,
+    declare_job_topology,
     load_rabbitmq_settings,
     parse_job_message,
 )
@@ -61,9 +62,12 @@ def _republish_for_retry(
     properties: Any,
     body: bytes,
     next_attempt: int,
+    error: str,
 ) -> None:
     headers = dict(getattr(properties, "headers", None) or {})
     headers["x-attempt"] = next_attempt
+    headers["x-last-error"] = error
+    headers["x-max-attempts"] = _max_job_attempts()
     channel.basic_publish(
         exchange="",
         routing_key=settings.queue_ingest,
@@ -131,56 +135,76 @@ def _handle_delivery(body: bytes) -> None:
     raise ValueError(f"Unsupported job kind: {message.kind}")
 
 
+def _process_message(
+    *,
+    channel: Any,
+    method: Any,
+    properties: Any,
+    body: bytes,
+    settings: Any,
+) -> None:
+    try:
+        _handle_delivery(body)
+    except Exception as exc:
+        try:
+            message = parse_job_message(body)
+            attempt = _current_attempt(properties)
+            max_attempts = _max_job_attempts()
+            if attempt < max_attempts:
+                next_attempt = attempt + 1
+                _republish_for_retry(
+                    channel=channel,
+                    settings=settings,
+                    properties=properties,
+                    body=body,
+                    next_attempt=next_attempt,
+                    error=str(exc),
+                )
+                RedisJobStatusStore().update_job(
+                    job_id=message.job_id,
+                    status="queued",
+                    error=f"retrying attempt {next_attempt} of {max_attempts}: {exc}",
+                    queue=settings.queue_ingest,
+                )
+                logger.warning(
+                    "worker retrying job_id=%s next_attempt=%s max_attempts=%s",
+                    message.job_id,
+                    next_attempt,
+                    max_attempts,
+                )
+                channel.basic_ack(delivery_tag=method.delivery_tag)
+                return
+
+            RedisJobStatusStore().update_job(
+                job_id=message.job_id,
+                status="failed",
+                error=str(exc),
+                queue=settings.queue_ingest_failed,
+            )
+        except Exception:
+            logger.exception("worker failed to persist job status")
+        logger.exception("worker failed queue=%s", settings.queue_ingest)
+        channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+        return
+
+    channel.basic_ack(delivery_tag=method.delivery_tag)
+
+
 def run_worker() -> None:
     settings = load_rabbitmq_settings()
     connection = _connect_with_retry(settings)
     channel = connection.channel()
-    channel.queue_declare(queue=settings.queue_ingest, durable=True)
+    declare_job_topology(channel, settings)
     channel.basic_qos(prefetch_count=1)
 
     def on_message(channel: Any, method: Any, properties: Any, body: bytes) -> None:
-        try:
-            _handle_delivery(body)
-        except Exception as exc:
-            try:
-                message = parse_job_message(body)
-                attempt = _current_attempt(properties)
-                max_attempts = _max_job_attempts()
-                if attempt < max_attempts:
-                    next_attempt = attempt + 1
-                    _republish_for_retry(
-                        channel=channel,
-                        settings=settings,
-                        properties=properties,
-                        body=body,
-                        next_attempt=next_attempt,
-                    )
-                    RedisJobStatusStore().update_job(
-                        job_id=message.job_id,
-                        status="queued",
-                        error=f"retrying attempt {next_attempt} of {max_attempts}: {exc}",
-                    )
-                    logger.warning(
-                        "worker retrying job_id=%s next_attempt=%s max_attempts=%s",
-                        message.job_id,
-                        next_attempt,
-                        max_attempts,
-                    )
-                    channel.basic_ack(delivery_tag=method.delivery_tag)
-                    return
-
-                RedisJobStatusStore().update_job(
-                    job_id=message.job_id,
-                    status="failed",
-                    error=str(exc),
-                )
-            except Exception:
-                logger.exception("worker failed to persist job status")
-            logger.exception("worker failed queue=%s", settings.queue_ingest)
-            channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
-            return
-
-        channel.basic_ack(delivery_tag=method.delivery_tag)
+        _process_message(
+            channel=channel,
+            method=method,
+            properties=properties,
+            body=body,
+            settings=settings,
+        )
 
     logger.info(
         "worker listening queue=%s host=%s port=%s",

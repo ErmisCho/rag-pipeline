@@ -70,7 +70,14 @@ class RedisJobStatusStore:
         self.client.set(self._key(job_id), json.dumps(asdict(record), separators=(",", ":"), sort_keys=True))
         return record
 
-    def update_job(self, *, job_id: str, status: str, error: Optional[str] = None) -> JobStatusRecord:
+    def update_job(
+        self,
+        *,
+        job_id: str,
+        status: str,
+        error: Optional[str] = None,
+        queue: Optional[str] = None,
+    ) -> JobStatusRecord:
         current = self.get_job(job_id)
         if current is None:
             raise KeyError(job_id)
@@ -78,7 +85,7 @@ class RedisJobStatusStore:
             job_id=current.job_id,
             kind=current.kind,
             status=status,
-            queue=current.queue,
+            queue=queue or current.queue,
             created_at=current.created_at,
             updated_at=utc_now_iso(),
             error=error,

@@ -16,6 +16,8 @@ class RabbitMQSettings:
     password: str
     vhost: str
     queue_ingest: str
+    exchange_dead_letter: str
+    queue_ingest_failed: str
 
 
 @dataclass(frozen=True)
@@ -57,13 +59,22 @@ class CrawlJobMessage:
 
 
 def load_rabbitmq_settings() -> RabbitMQSettings:
+    queue_ingest = os.environ["RABBITMQ_QUEUE_INGEST"]
     return RabbitMQSettings(
         host=os.environ["RABBITMQ_HOST"],
         port=int(os.environ["RABBITMQ_PORT"]),
         user=os.environ["RABBITMQ_USER"],
         password=os.environ["RABBITMQ_PASSWORD"],
         vhost=os.environ["RABBITMQ_VHOST"],
-        queue_ingest=os.environ["RABBITMQ_QUEUE_INGEST"],
+        queue_ingest=queue_ingest,
+        exchange_dead_letter=os.environ.get(
+            "RABBITMQ_EXCHANGE_DEAD_LETTER",
+            f"{queue_ingest}.dead_letter",
+        ),
+        queue_ingest_failed=os.environ.get(
+            "RABBITMQ_QUEUE_INGEST_FAILED",
+            f"{queue_ingest}.failed",
+        ),
     )
 
 
@@ -119,6 +130,28 @@ def build_crawl_job_message(
     )
 
 
+def declare_job_topology(channel: pika.channel.Channel, settings: RabbitMQSettings) -> None:
+    channel.exchange_declare(
+        exchange=settings.exchange_dead_letter,
+        exchange_type="direct",
+        durable=True,
+    )
+    channel.queue_declare(queue=settings.queue_ingest_failed, durable=True)
+    channel.queue_bind(
+        exchange=settings.exchange_dead_letter,
+        queue=settings.queue_ingest_failed,
+        routing_key=settings.queue_ingest_failed,
+    )
+    channel.queue_declare(
+        queue=settings.queue_ingest,
+        durable=True,
+        arguments={
+            "x-dead-letter-exchange": settings.exchange_dead_letter,
+            "x-dead-letter-routing-key": settings.queue_ingest_failed,
+        },
+    )
+
+
 def parse_job_message(body: bytes | str) -> IngestJobMessage | CrawlJobMessage:
     raw_message = body.decode("utf-8") if isinstance(body, bytes) else body
     data = json.loads(raw_message)
@@ -170,7 +203,7 @@ def publish_ingest_job(
     connection = pika.BlockingConnection(build_connection_parameters(resolved))
     try:
         channel = connection.channel()
-        channel.queue_declare(queue=resolved.queue_ingest, durable=True)
+        declare_job_topology(channel, resolved)
         channel.basic_publish(
             exchange="",
             routing_key=resolved.queue_ingest,
@@ -181,6 +214,10 @@ def publish_ingest_job(
                 message_id=message.job_id,
                 timestamp=int(datetime.now(UTC).timestamp()),
                 type=message.kind,
+                headers={
+                    "x-attempt": 1,
+                    "x-max-attempts": int(os.environ.get("WORKER_JOB_MAX_ATTEMPTS", "3")),
+                },
             ),
         )
     finally:
@@ -208,7 +245,7 @@ def publish_crawl_job(
     connection = pika.BlockingConnection(build_connection_parameters(resolved))
     try:
         channel = connection.channel()
-        channel.queue_declare(queue=resolved.queue_ingest, durable=True)
+        declare_job_topology(channel, resolved)
         channel.basic_publish(
             exchange="",
             routing_key=resolved.queue_ingest,
@@ -219,6 +256,10 @@ def publish_crawl_job(
                 message_id=message.job_id,
                 timestamp=int(datetime.now(UTC).timestamp()),
                 type=message.kind,
+                headers={
+                    "x-attempt": 1,
+                    "x-max-attempts": int(os.environ.get("WORKER_JOB_MAX_ATTEMPTS", "3")),
+                },
             ),
         )
     finally:

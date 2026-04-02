@@ -24,7 +24,25 @@ def test_create_job_persists_queued_status():
     assert record.kind == "ingest_document"
     assert record.status == "queued"
     assert record.queue == "ingest"
-    assert record.error is None
+
+
+def test_update_job_can_move_record_to_failed_queue():
+    store = RedisJobStatusStore(
+        client=FakeRedis(),
+        settings=RedisSettings(host="redis", port=6379, db=0, key_prefix="job_status"),
+    )
+    store.create_job(job_id="job-123", kind="ingest_document", queue="ingest")
+
+    record = store.update_job(
+        job_id="job-123",
+        status="failed",
+        error="boom",
+        queue="ingest.failed",
+    )
+
+    assert record.status == "failed"
+    assert record.queue == "ingest.failed"
+    assert record.error == "boom"
 
 
 def test_update_job_transitions_status():

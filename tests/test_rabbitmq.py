@@ -6,6 +6,7 @@ from backend.rabbitmq import (
     build_connection_parameters,
     build_crawl_job_message,
     build_ingest_job_message,
+    declare_job_topology,
     load_rabbitmq_settings,
     parse_job_message,
 )
@@ -28,6 +29,8 @@ def test_load_rabbitmq_settings_from_env(monkeypatch):
         password="guest",
         vhost="/",
         queue_ingest="ingest",
+        exchange_dead_letter="ingest.dead_letter",
+        queue_ingest_failed="ingest.failed",
     )
 
 
@@ -60,6 +63,8 @@ def test_build_connection_parameters_uses_settings():
         password="guest",
         vhost="/",
         queue_ingest="ingest",
+        exchange_dead_letter="ingest.dead_letter",
+        queue_ingest_failed="ingest.failed",
     )
 
     params = build_connection_parameters(settings)
@@ -67,6 +72,69 @@ def test_build_connection_parameters_uses_settings():
     assert params.host == "rabbitmq"
     assert params.port == 5672
     assert params.virtual_host == "/"
+
+
+def test_declare_job_topology_declares_dead_letter_queue():
+    calls = []
+
+    class FakeChannel:
+        def exchange_declare(self, **kwargs):
+            calls.append(("exchange_declare", kwargs))
+
+        def queue_declare(self, **kwargs):
+            calls.append(("queue_declare", kwargs))
+
+        def queue_bind(self, **kwargs):
+            calls.append(("queue_bind", kwargs))
+
+    declare_job_topology(
+        FakeChannel(),
+        RabbitMQSettings(
+            host="rabbitmq",
+            port=5672,
+            user="guest",
+            password="guest",
+            vhost="/",
+            queue_ingest="ingest",
+            exchange_dead_letter="ingest.dead_letter",
+            queue_ingest_failed="ingest.failed",
+        ),
+    )
+
+    assert calls[0] == (
+        "exchange_declare",
+        {
+            "exchange": "ingest.dead_letter",
+            "exchange_type": "direct",
+            "durable": True,
+        },
+    )
+    assert calls[1] == (
+        "queue_declare",
+        {
+            "queue": "ingest.failed",
+            "durable": True,
+        },
+    )
+    assert calls[2] == (
+        "queue_bind",
+        {
+            "exchange": "ingest.dead_letter",
+            "queue": "ingest.failed",
+            "routing_key": "ingest.failed",
+        },
+    )
+    assert calls[3] == (
+        "queue_declare",
+        {
+            "queue": "ingest",
+            "durable": True,
+            "arguments": {
+                "x-dead-letter-exchange": "ingest.dead_letter",
+                "x-dead-letter-routing-key": "ingest.failed",
+            },
+        },
+    )
 
 
 def test_parse_ingest_job_message_round_trips_payload():
