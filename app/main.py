@@ -14,7 +14,7 @@ API_INGEST_URL = f"{API_BASE_URL}/ingest"
 API_CRAWL_URL = f"{API_BASE_URL}/crawl"
 API_JOBS_URL = f"{API_BASE_URL}/jobs"
 TOP_K = 10
-REQUEST_TIMEOUT_SECONDS = 30
+REQUEST_TIMEOUT_SECONDS = 60
 JOB_POLL_INTERVAL_SECONDS = 2
 TERMINAL_JOB_STATUSES = {"completed", "failed"}
 
@@ -107,6 +107,8 @@ with st.expander("Ingest or Crawl Documents", expanded=True):
                     st.success(
                         f"Ingest job created. Tracking job `{st.session_state['active_job']['job_id']}`."
                     )
+                except TimeoutError:
+                    st.error("The ingest request timed out. Please try again.")
                 except (urllib.error.URLError, urllib.error.HTTPError, ValueError):
                     st.error("Ingest request failed. Please verify the FastAPI service is running.")
 
@@ -137,6 +139,8 @@ with st.expander("Ingest or Crawl Documents", expanded=True):
                     st.success(
                         f"Crawl job created. Tracking job `{st.session_state['active_job']['job_id']}`."
                     )
+                except TimeoutError:
+                    st.error("The crawl request timed out. Please try again.")
                 except (urllib.error.URLError, urllib.error.HTTPError, ValueError):
                     st.error("Crawl request failed. Please verify the FastAPI service is running.")
 
@@ -149,6 +153,8 @@ with st.expander("Ingest or Crawl Documents", expanded=True):
                 latest_record = fetch_job_status(job_id)
                 st.session_state["active_job"] = latest_record
                 active_job = latest_record
+            except TimeoutError:
+                st.warning(f"Loading job status for `{job_id}` timed out. Trying again on refresh.")
             except urllib.error.HTTPError as exc:
                 st.warning(f"Could not load job status for `{job_id}`: HTTP {exc.code}.")
             except (urllib.error.URLError, ValueError):
@@ -178,6 +184,9 @@ if prompt:
             formatted_response = (
                 f"{answer_text} \n\n {create_sources_string(sources)}"
             )
+        except TimeoutError:
+            st.error("The answer request timed out. Please try again.")
+            formatted_response = None
         except (urllib.error.URLError, urllib.error.HTTPError, ValueError):
             st.error("API not reachable. Please start the FastAPI service.")
             formatted_response = None
