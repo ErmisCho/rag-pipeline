@@ -15,6 +15,12 @@ def pytest_addoption(parser):
         default=False,
         help="Run fast tests only (skip integration tests requiring infrastructure)",
     )
+    parser.addoption(
+        "--live-integration",
+        action="store_true",
+        default=False,
+        help="Enable integration tests that require live infrastructure",
+    )
 
 
 def pytest_configure(config):
@@ -30,10 +36,21 @@ def pytest_configure(config):
 
 
 def pytest_collection_modifyitems(config, items):
-    """Skip integration tests if --fast flag is used."""
+    """Control integration test collection from CLI switches."""
+    live_integration = config.getoption("--live-integration")
+
     if config.getoption("--fast"):
         skip_integration = pytest.mark.skip(
-            reason="skipped with -f (fast mode)")
+            reason="skipped with --fast")
+        for item in items:
+            if "integration" in item.keywords:
+                item.add_marker(skip_integration)
+        return
+
+    if not live_integration:
+        skip_integration = pytest.mark.skip(
+            reason="skipped integration test; pass --live-integration to enable"
+        )
         for item in items:
             if "integration" in item.keywords:
                 item.add_marker(skip_integration)

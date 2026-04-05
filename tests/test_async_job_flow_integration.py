@@ -53,10 +53,6 @@ def _http_json(
 
 def _require_live_stack() -> None:
     """Skip test if infrastructure is not available."""
-    if os.environ.get("RUN_ASYNC_JOB_INTEGRATION") != "1":
-        pytest.skip(
-            "set RUN_ASYNC_JOB_INTEGRATION=1 to run async job integration tests")
-
     try:
         _http_json(method="GET", url=f"{_api_base_url()}/health")
     except urllib.error.URLError as exc:
