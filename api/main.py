@@ -98,13 +98,32 @@ async def ingest(payload: IngestRequest):
             text=payload.text,
             metadata=payload.metadata,
         )
+        logger.info(
+            "stage=ingest job_create_start queue=%s doc_id=%s job_id=%s",
+            settings.queue_ingest,
+            payload.doc_id,
+            message.job_id,
+        )
         store = RedisJobStatusStore()
         record = store.create_job(
             job_id=message.job_id,
             kind=message.kind,
             queue=settings.queue_ingest,
         )
+        logger.info(
+            "stage=ingest job_created status=%s queue=%s doc_id=%s job_id=%s",
+            record.status,
+            record.queue,
+            payload.doc_id,
+            message.job_id,
+        )
         try:
+            logger.info(
+                "stage=ingest publish_start queue=%s doc_id=%s job_id=%s",
+                settings.queue_ingest,
+                payload.doc_id,
+                message.job_id,
+            )
             publish_ingest_job(
                 doc_id=payload.doc_id,
                 text=payload.text,
@@ -112,8 +131,20 @@ async def ingest(payload: IngestRequest):
                 settings=settings,
                 job_id=message.job_id,
             )
+            logger.info(
+                "stage=ingest publish_complete queue=%s doc_id=%s job_id=%s",
+                settings.queue_ingest,
+                payload.doc_id,
+                message.job_id,
+            )
         except Exception as exc:
             store.update_job(job_id=message.job_id, status="failed", error=str(exc))
+            logger.exception(
+                "stage=ingest publish_failed queue=%s doc_id=%s job_id=%s",
+                settings.queue_ingest,
+                payload.doc_id,
+                message.job_id,
+            )
             raise
     except KeyError as e:
         logger.exception("stage=ingest error=missing_env")
@@ -286,13 +317,32 @@ async def crawl(payload: CrawlRequest):
             max_depth=payload.max_depth,
             extract_depth=payload.extract_depth,
         )
+        logger.info(
+            "stage=crawl job_create_start queue=%s url=%s job_id=%s",
+            settings.queue_ingest,
+            payload.url,
+            message.job_id,
+        )
         store = RedisJobStatusStore()
         record = store.create_job(
             job_id=message.job_id,
             kind=message.kind,
             queue=settings.queue_ingest,
         )
+        logger.info(
+            "stage=crawl job_created status=%s queue=%s url=%s job_id=%s",
+            record.status,
+            record.queue,
+            payload.url,
+            message.job_id,
+        )
         try:
+            logger.info(
+                "stage=crawl publish_start queue=%s url=%s job_id=%s",
+                settings.queue_ingest,
+                payload.url,
+                message.job_id,
+            )
             publish_crawl_job(
                 url=payload.url,
                 max_depth=payload.max_depth,
@@ -300,8 +350,20 @@ async def crawl(payload: CrawlRequest):
                 settings=settings,
                 job_id=message.job_id,
             )
+            logger.info(
+                "stage=crawl publish_complete queue=%s url=%s job_id=%s",
+                settings.queue_ingest,
+                payload.url,
+                message.job_id,
+            )
         except Exception as exc:
             store.update_job(job_id=message.job_id, status="failed", error=str(exc))
+            logger.exception(
+                "stage=crawl publish_failed queue=%s url=%s job_id=%s",
+                settings.queue_ingest,
+                payload.url,
+                message.job_id,
+            )
             raise
     except Exception as e:
         logger.exception("stage=crawl error=internal")

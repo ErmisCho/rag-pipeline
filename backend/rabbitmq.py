@@ -7,6 +7,11 @@ from typing import Any, Dict, Optional
 
 import pika
 
+from .logger import get_logger
+
+
+logger = get_logger(__name__)
+
 
 @dataclass(frozen=True)
 class RabbitMQSettings:
@@ -199,6 +204,15 @@ def publish_ingest_job(
         metadata=metadata,
         job_id=job_id,
     )
+    max_attempts = int(os.environ.get("WORKER_JOB_MAX_ATTEMPTS", "3"))
+
+    logger.info(
+        "queue publish_start queue=%s kind=%s doc_id=%s job_id=%s",
+        resolved.queue_ingest,
+        message.kind,
+        message.payload.doc_id,
+        message.job_id,
+    )
 
     connection = pika.BlockingConnection(build_connection_parameters(resolved))
     try:
@@ -216,12 +230,21 @@ def publish_ingest_job(
                 type=message.kind,
                 headers={
                     "x-attempt": 1,
-                    "x-max-attempts": int(os.environ.get("WORKER_JOB_MAX_ATTEMPTS", "3")),
+                    "x-max-attempts": max_attempts,
                 },
             ),
         )
     finally:
         connection.close()
+
+    logger.info(
+        "queue publish_complete queue=%s kind=%s attempt=%s max_attempts=%s job_id=%s",
+        resolved.queue_ingest,
+        message.kind,
+        1,
+        max_attempts,
+        message.job_id,
+    )
 
     return message
 
@@ -241,6 +264,15 @@ def publish_crawl_job(
         extract_depth=extract_depth,
         job_id=job_id,
     )
+    max_attempts = int(os.environ.get("WORKER_JOB_MAX_ATTEMPTS", "3"))
+
+    logger.info(
+        "queue publish_start queue=%s kind=%s url=%s job_id=%s",
+        resolved.queue_ingest,
+        message.kind,
+        message.payload.url,
+        message.job_id,
+    )
 
     connection = pika.BlockingConnection(build_connection_parameters(resolved))
     try:
@@ -258,11 +290,20 @@ def publish_crawl_job(
                 type=message.kind,
                 headers={
                     "x-attempt": 1,
-                    "x-max-attempts": int(os.environ.get("WORKER_JOB_MAX_ATTEMPTS", "3")),
+                    "x-max-attempts": max_attempts,
                 },
             ),
         )
     finally:
         connection.close()
+
+    logger.info(
+        "queue publish_complete queue=%s kind=%s attempt=%s max_attempts=%s job_id=%s",
+        resolved.queue_ingest,
+        message.kind,
+        1,
+        max_attempts,
+        message.job_id,
+    )
 
     return message

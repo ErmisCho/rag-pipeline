@@ -6,6 +6,11 @@ from typing import Optional
 
 from redis import Redis
 
+from .logger import get_logger
+
+
+logger = get_logger(__name__)
+
 
 @dataclass(frozen=True)
 class RedisSettings:
@@ -68,6 +73,13 @@ class RedisJobStatusStore:
             updated_at=timestamp,
         )
         self.client.set(self._key(job_id), json.dumps(asdict(record), separators=(",", ":"), sort_keys=True))
+        logger.info(
+            "job created job_id=%s kind=%s status=%s queue=%s",
+            record.job_id,
+            record.kind,
+            record.status,
+            record.queue,
+        )
         return record
 
     def update_job(
@@ -91,6 +103,14 @@ class RedisJobStatusStore:
             error=error,
         )
         self.client.set(self._key(job_id), json.dumps(asdict(record), separators=(",", ":"), sort_keys=True))
+        logger.info(
+            "job updated job_id=%s kind=%s status=%s queue=%s error=%s",
+            record.job_id,
+            record.kind,
+            record.status,
+            record.queue,
+            record.error,
+        )
         return record
 
     def get_job(self, job_id: str) -> Optional[JobStatusRecord]:

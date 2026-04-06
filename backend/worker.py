@@ -86,11 +86,18 @@ def _republish_for_retry(
 def _handle_delivery(body: bytes) -> None:
     message = parse_job_message(body)
     store = RedisJobStatusStore()
+    current = store.get_job(message.job_id)
+    logger.info(
+        "worker consume_start queue=%s kind=%s job_id=%s",
+        current.queue if current else "-",
+        message.kind,
+        message.job_id,
+    )
     store.update_job(job_id=message.job_id, status="running")
 
     if message.kind == "ingest_document":
         logger.info(
-            "worker received job_id=%s kind=%s doc_id=%s",
+            "worker job_start job_id=%s kind=%s doc_id=%s",
             message.job_id,
             message.kind,
             message.payload.doc_id,
@@ -103,8 +110,9 @@ def _handle_delivery(body: bytes) -> None:
             )
         )
         logger.info(
-            "worker completed job_id=%s doc_id=%s",
+            "worker complete job_id=%s kind=%s doc_id=%s",
             message.job_id,
+            message.kind,
             message.payload.doc_id,
         )
         store.update_job(job_id=message.job_id, status="completed")
@@ -112,7 +120,7 @@ def _handle_delivery(body: bytes) -> None:
 
     if message.kind == "crawl_documentation":
         logger.info(
-            "worker received job_id=%s kind=%s url=%s",
+            "worker job_start job_id=%s kind=%s url=%s",
             message.job_id,
             message.kind,
             message.payload.url,
@@ -125,8 +133,9 @@ def _handle_delivery(body: bytes) -> None:
             )
         )
         logger.info(
-            "worker completed job_id=%s url=%s",
+            "worker complete job_id=%s kind=%s url=%s",
             message.job_id,
+            message.kind,
             message.payload.url,
         )
         store.update_job(job_id=message.job_id, status="completed")
@@ -167,10 +176,12 @@ def _process_message(
                     queue=settings.queue_ingest,
                 )
                 logger.warning(
-                    "worker retrying job_id=%s next_attempt=%s max_attempts=%s",
+                    "worker retry job_id=%s attempt=%s next_attempt=%s max_attempts=%s error=%s",
                     message.job_id,
+                    attempt,
                     next_attempt,
                     max_attempts,
+                    exc,
                 )
                 channel.basic_ack(delivery_tag=method.delivery_tag)
                 return
@@ -180,6 +191,15 @@ def _process_message(
                 status="failed",
                 error=str(exc),
                 queue=settings.queue_ingest_failed,
+            )
+            logger.error(
+                "worker failed job_id=%s attempt=%s max_attempts=%s queue=%s failed_queue=%s error=%s",
+                message.job_id,
+                attempt,
+                max_attempts,
+                settings.queue_ingest,
+                settings.queue_ingest_failed,
+                exc,
             )
         except Exception:
             logger.exception("worker failed to persist job status")
