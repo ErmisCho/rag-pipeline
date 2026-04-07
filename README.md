@@ -1,10 +1,12 @@
 # Documentation Helper
 
-Production-style documentation Q&A system built with FastAPI, Streamlit, LangChain, Pinecone, RabbitMQ, and Redis.
-
-It crawls documentation sites, chunks and embeds content, stores vectors in Pinecone, and serves citation-backed answers through both an API and a lightweight UI. Ingestion runs asynchronously through a queue and worker so the read path stays responsive while crawl and indexing work happens in the background.
-
 ![Demo](assets/demo.gif)
+
+Production-style asynchronous document ingestion and retrieval system built with FastAPI, RabbitMQ, and Redis.
+
+The system crawls documentation, processes ingestion jobs via background workers, and serves citation-backed answers through a responsive API and UI.
+
+**Key idea:** The API never blocks on ingestion. All crawl and indexing work is offloaded to RabbitMQ workers, keeping the query path fast and reliable.
 
 ## Why This Project Matters
 
@@ -17,7 +19,7 @@ This project focuses on the engineering concerns that matter in production-orien
 - Containerized local stack with API, worker, UI, Redis, and RabbitMQ
 - Unit and integration tests around API, ingestion, queues, and worker behavior
 
-The system is designed to keep query handling responsive while background ingestion, crawl, and indexing work are processed asynchronously, with support for local or hosted model providers and containerized local infrastructure.
+Designed for production-style workflows, the system prioritizes responsiveness on the query path while handling ingestion and indexing asynchronously in the background.
 
 ## Architecture
 
